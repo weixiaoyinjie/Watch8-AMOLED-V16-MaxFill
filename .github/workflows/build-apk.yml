@@ -1,0 +1,52 @@
+name: Build Watch8 V16 Geometry from ZIP
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract uploaded ZIP (no manual unzip)
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive='Watch8_AMOLED_Shortcuts_V16_GeometryMaxFill_OneUpload.zip'
+          test -f "$archive" || { echo "::error::Upload $archive to repository root"; exit 1; }
+          mkdir -p project
+          unzip -q "$archive" -d project
+          test -f project/settings.gradle.kts
+          test -f project/app/src/main/res/raw/watchface.xml
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - uses: android-actions/setup-android@v4
+      - name: Install Android SDK
+        run: sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
+      - name: Verify shortcuts and text sizes
+        working-directory: project
+        run: |
+          python3 - <<'PYXML'
+          import xml.etree.ElementTree as ET
+          r=ET.parse('app/src/main/res/raw/watchface.xml').getroot()
+          assert len(r.findall('.//ComplicationSlot')) == 8
+          assert r.find('.//DigitalClock/TimeText/Font').get('size') == '66'
+          assert r.find('.//PartText[@name="DateChineseWeekday"]//Font').get('size') == '19'
+          assert r.find('.//PartText[@name="Battery"]//Font').get('size') == '20'
+          print('V16 geometry source verified')
+          PYXML
+      - name: Build watchface APK
+        working-directory: project
+        run: gradle --no-daemon :app:assembleDebug --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Watch8-V16-APK
+          path: project/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
